@@ -120,7 +120,7 @@ typedef NS_ENUM(NSInteger, IJKSDLGLViewApplicationState) {
     glGenRenderbuffers(1, &_renderbuffer);
     glBindFramebuffer(GL_FRAMEBUFFER, _framebuffer);
     glBindRenderbuffer(GL_RENDERBUFFER, _renderbuffer);
-    [_context renderbufferStorage:GL_RENDERBUFFER fromDrawable:(CAEAGLLayer*)self.layer];
+    [_context renderbufferStorage:GL_RENDERBUFFER fromDrawable:[self eaglLayer]];
     glGetRenderbufferParameteriv(GL_RENDERBUFFER, GL_RENDERBUFFER_WIDTH, &_backingWidth);
     glGetRenderbufferParameteriv(GL_RENDERBUFFER, GL_RENDERBUFFER_HEIGHT, &_backingHeight);
     glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, _renderbuffer);
@@ -140,9 +140,18 @@ typedef NS_ENUM(NSInteger, IJKSDLGLViewApplicationState) {
     return YES;
 }
 
-- (CAEAGLLayer *)eaglLayer
-{
-    return (CAEAGLLayer*) self.layer;
+- (CAEAGLLayer *)eaglLayer {
+    __block CAEAGLLayer *caeaglLayer = nil;
+    if ([NSThread isMainThread]) {
+        return (CAEAGLLayer *)self.layer;
+    } else {
+        //同步切换至主线程，避免报错（Main Thread Checker: UI API called on a background thread: -[UIView layer]）
+        dispatch_sync(dispatch_get_main_queue(), ^{
+            caeaglLayer = (CAEAGLLayer *)self.layer;
+        });
+        
+        return caeaglLayer;
+    }
 }
 
 - (BOOL)setupGL
@@ -150,7 +159,7 @@ typedef NS_ENUM(NSInteger, IJKSDLGLViewApplicationState) {
     if (_didSetupGL)
         return YES;
 
-    CAEAGLLayer *eaglLayer = (CAEAGLLayer*) self.layer;
+    CAEAGLLayer *eaglLayer = [self eaglLayer];
     eaglLayer.opaque = YES;
     eaglLayer.drawableProperties = [NSDictionary dictionaryWithObjectsAndKeys:
                                     [NSNumber numberWithBool:NO], kEAGLDrawablePropertyRetainedBacking,
@@ -203,15 +212,26 @@ typedef NS_ENUM(NSInteger, IJKSDLGLViewApplicationState) {
         case IJKSDLGLViewApplicationBackgroundState:
             return NO;
         default: {
-            UIApplicationState appState = [UIApplication sharedApplication].applicationState;
-            switch (appState) {
-                case UIApplicationStateActive:
-                    return YES;
-                case UIApplicationStateInactive:
-                case UIApplicationStateBackground:
-                default:
-                    return NO;
+            __block BOOL retVal = NO;
+            if([NSThread isMainThread]) {
+                retVal = [UIApplication sharedApplication].applicationState == UIApplicationStateActive;
+            } else {
+                //同步切换至主线程，避免报错（Main Thread Checker: UI API called on a background thread: -[UIApplication applicationState]）
+                dispatch_sync(dispatch_get_main_queue(), ^{
+                    retVal = [UIApplication sharedApplication].applicationState == UIApplicationStateActive;
+                });
             }
+            
+            return retVal;
+//            UIApplicationState appState = [UIApplication sharedApplication].applicationState;
+//            switch (appState) {
+//                case UIApplicationStateActive:
+//                    return YES;
+//                case UIApplicationStateInactive:
+//                case UIApplicationStateBackground:
+//                default:
+//                    return NO;
+//            }
         }
     }
 }
@@ -378,7 +398,7 @@ typedef NS_ENUM(NSInteger, IJKSDLGLViewApplicationState) {
         _isRenderBufferInvalidated = NO;
 
         glBindRenderbuffer(GL_RENDERBUFFER, _renderbuffer);
-        [_context renderbufferStorage:GL_RENDERBUFFER fromDrawable:(CAEAGLLayer*)self.layer];
+        [_context renderbufferStorage:GL_RENDERBUFFER fromDrawable:[self eaglLayer]];
         glGetRenderbufferParameteriv(GL_RENDERBUFFER, GL_RENDERBUFFER_WIDTH, &_backingWidth);
         glGetRenderbufferParameteriv(GL_RENDERBUFFER, GL_RENDERBUFFER_HEIGHT, &_backingHeight);
         IJK_GLES2_Renderer_setGravity(_renderer, _rendererGravity, _backingWidth, _backingHeight);
